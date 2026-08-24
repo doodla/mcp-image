@@ -141,8 +141,24 @@ class GeminiClientImpl implements ImageClient {
       const requestContent: Content[] = []
 
       // Structure the contents properly for image generation/editing
-      if (params.inputImage) {
-        // For image editing: provide image first, then text instructions
+      if (params.inputImages && params.inputImages.length > 0) {
+        // For multi-image editing/composition: provide every reference image
+        // first, in order, then the text instructions.
+        requestContent.push({
+          parts: [
+            ...params.inputImages.map((image) => ({
+              inlineData: {
+                data: image.data,
+                mimeType: image.mimeType || DEFAULT_MIME_TYPE,
+              },
+            })),
+            {
+              text: params.prompt,
+            },
+          ],
+        })
+      } else if (params.inputImage) {
+        // For single-image editing: provide image first, then text instructions
         requestContent.push({
           parts: [
             {

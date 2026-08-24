@@ -62,7 +62,13 @@ const SEEDREAM_ROUTES = {
 
 type ProviderCapabilityInput = Pick<
   ImageApiParams,
-  'inputImage' | 'inputImageMimeType' | 'aspectRatio' | 'imageSize' | 'useGoogleSearch' | 'quality'
+  | 'inputImage'
+  | 'inputImageMimeType'
+  | 'inputImages'
+  | 'aspectRatio'
+  | 'imageSize'
+  | 'useGoogleSearch'
+  | 'quality'
 >
 
 type SeedreamRoute = (typeof SEEDREAM_ROUTES)[ImageQuality]
@@ -145,6 +151,12 @@ function resolveCapabilities(
 ): Result<ResolvedCapabilities, ImageAPIError> {
   if (input.useGoogleSearch === true) {
     return capabilityError('Google Search is not supported by the Seedream image provider')
+  }
+
+  if (input.inputImages && input.inputImages.length > 1) {
+    return capabilityError(
+      'The Seedream image provider supports only a single input image; use inputImagePath with one path, not multiple inputImagePaths'
+    )
   }
 
   const quality = input.quality ?? defaultQuality

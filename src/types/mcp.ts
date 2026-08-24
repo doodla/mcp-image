@@ -81,6 +81,8 @@ export interface GenerateImageParams {
   fileName?: string
   /** Absolute path to input image for editing (optional) */
   inputImagePath?: string
+  /** Absolute paths to multiple input images, combined in order, for composites or multi-reference edits (optional). Mutually exclusive with inputImagePath. */
+  inputImagePaths?: string[]
   /** Base64 encoded input image data (optional) */
   inputImage?: string
   /** MIME type of the input image (optional, used with inputImage) */

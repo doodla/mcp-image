@@ -16,6 +16,7 @@ import { SUPPORTED_EXTENSIONS, SUPPORTED_MIME_TYPES } from '../utils/mimeUtils.j
 const PROMPT_MIN_LENGTH = 1
 const PROMPT_MAX_LENGTH = 4000
 export const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB in bytes
+export const MAX_INPUT_IMAGES = 10
 const SUPPORTED_ASPECT_RATIOS = ASPECT_RATIO_VALUES
 const SUPPORTED_QUALITY_VALUES = IMAGE_QUALITY_VALUES
 const SUPPORTED_PROVIDER_VALUES = IMAGE_PROVIDER_VALUES
@@ -147,6 +148,38 @@ function validateImagePath(imagePath?: string): Result<string | undefined, Input
 }
 
 /**
+ * Validates multiple input image paths
+ * @param imagePaths - Paths to the input image files
+ * @returns Result with validated paths or error
+ */
+function validateImagePaths(
+  imagePaths?: string[]
+): Result<string[] | undefined, InputValidationError> {
+  // If no paths provided, it's valid (optional parameter)
+  if (!imagePaths || imagePaths.length === 0) {
+    return Ok(undefined)
+  }
+
+  if (imagePaths.length > MAX_INPUT_IMAGES) {
+    return Err(
+      new InputValidationError(
+        `Too many input images: ${imagePaths.length}. Maximum allowed: ${MAX_INPUT_IMAGES}`,
+        `Please provide at most ${MAX_INPUT_IMAGES} input image paths`
+      )
+    )
+  }
+
+  for (const imagePath of imagePaths) {
+    const pathResult = validateImagePath(imagePath)
+    if (!pathResult.success) {
+      return Err(pathResult.error)
+    }
+  }
+
+  return Ok(imagePaths)
+}
+
+/**
  * Validates complete GenerateImageParams object
  */
 export function validateGenerateImageParams(
@@ -158,10 +191,26 @@ export function validateGenerateImageParams(
     return Err(promptResult.error)
   }
 
+  // inputImagePath and inputImagePaths are mutually exclusive
+  if (params.inputImagePath && params.inputImagePaths && params.inputImagePaths.length > 0) {
+    return Err(
+      new InputValidationError(
+        'Provide either inputImagePath or inputImagePaths, not both',
+        'Use inputImagePath for a single reference image or inputImagePaths for multiple; not both in the same request'
+      )
+    )
+  }
+
   // Validate input image path if provided
   const imagePathResult = validateImagePath(params.inputImagePath)
   if (!imagePathResult.success) {
     return Err(imagePathResult.error)
+  }
+
+  // Validate input image paths if provided
+  const imagePathsResult = validateImagePaths(params.inputImagePaths)
+  if (!imagePathsResult.success) {
+    return Err(imagePathsResult.error)
   }
 
   // Validate blendImages parameter

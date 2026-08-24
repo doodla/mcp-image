@@ -173,7 +173,13 @@ export class MCPServerImpl {
               inputImagePath: {
                 type: 'string' as const,
                 description:
-                  'Provide an absolute path to a source image when editing, creating a variation, or transferring style.',
+                  'Provide an absolute path to a source image when editing, creating a variation, or transferring style. For more than one reference image, use inputImagePaths instead.',
+              },
+              inputImagePaths: {
+                type: 'array' as const,
+                items: { type: 'string' as const },
+                description:
+                  'Provide absolute paths to multiple source images, in order, for composites or edits that reference more than one image (e.g. placing an element from one image into another). Mutually exclusive with inputImagePath. Supported by the gemini and openai providers; seedream accepts only one input image.',
               },
               blendImages: {
                 type: 'boolean' as const,
@@ -321,11 +327,18 @@ export class MCPServerImpl {
         provider
       )
 
-      // Handle input image if provided
-      let inputImageData: string | undefined
-      let inputImageMimeType: string | undefined
-      if (params.inputImagePath) {
-        const sanitizedInputPath = this.securityManager.sanitizeInputFilePath(params.inputImagePath)
+      // Handle input image(s) if provided. inputImagePaths (plural) and
+      // inputImagePath (singular) are mutually exclusive by this point
+      // (enforced in validateGenerateImageParams).
+      const inputImagePaths = params.inputImagePaths?.length
+        ? params.inputImagePaths
+        : params.inputImagePath
+          ? [params.inputImagePath]
+          : []
+
+      const inputImages: { data: string; mimeType: string }[] = []
+      for (const inputImagePath of inputImagePaths) {
+        const sanitizedInputPath = this.securityManager.sanitizeInputFilePath(inputImagePath)
         if (!sanitizedInputPath.success) {
           throw sanitizedInputPath.error
         }
@@ -334,13 +347,21 @@ export class MCPServerImpl {
           throw extensionCheck.error
         }
         const imageBuffer = await readInputImageWithinLimit(sanitizedInputPath.data)
-        inputImageData = imageBuffer.toString('base64')
-        inputImageMimeType = getMimeTypeFromExtension(path.extname(sanitizedInputPath.data))
+        inputImages.push({
+          data: imageBuffer.toString('base64'),
+          mimeType: getMimeTypeFromExtension(path.extname(sanitizedInputPath.data)),
+        })
       }
+
+      // The first image is also carried on the singular fields, for providers
+      // and prompt tooling that only understand a single reference image.
+      const inputImageData = inputImages[0]?.data
+      const inputImageMimeType = inputImages[0]?.mimeType
 
       const imageOptions = {
         ...(inputImageData && { inputImage: inputImageData }),
         ...(inputImageMimeType && { inputImageMimeType }),
+        ...(inputImages.length > 0 && { inputImages }),
         ...(params.aspectRatio && { aspectRatio: params.aspectRatio }),
         ...(params.imageSize && { imageSize: params.imageSize }),
         ...(params.useGoogleSearch !== undefined && {

@@ -487,6 +487,25 @@ describe('MCP Server', () => {
     expect(responseData.error.suggestion).toContain('descriptive prompt')
   })
 
+  it('should reject inputImagePath and inputImagePaths together', async () => {
+    // Arrange
+    const mcpServer = createMCPServer()
+
+    // Act
+    const result = await mcpServer.callTool('generate_image', {
+      prompt: 'Combine two references',
+      inputImagePath: '/tmp/a.png',
+      inputImagePaths: ['/tmp/b.png'],
+    })
+
+    // Assert
+    expect(result.isError).toBe(true)
+    const responseData = JSON.parse(result.content[0].text)
+    expect(responseData.error.message).toContain(
+      'Provide either inputImagePath or inputImagePaths, not both'
+    )
+  })
+
   it('should route image generation through OpenAI provider when configured', async () => {
     // Arrange
     process.env.IMAGE_PROVIDER = 'openai'
@@ -745,6 +764,36 @@ describe('MCP Server', () => {
 })
 
 // Test suite for aspectRatio parameter in generate_image tool schema
+describe('MCPServer tool schema - inputImagePaths', () => {
+  it('should include inputImagePaths as an array of strings in generate_image schema', () => {
+    // Arrange
+    const mcpServer = createMCPServer()
+
+    // Act
+    const toolsList = mcpServer.getToolsList()
+    const generateImageTool = toolsList.tools.find((t) => t.name === 'generate_image')
+    const property = generateImageTool?.inputSchema.properties?.inputImagePaths
+
+    // Assert
+    expect(property).toBeDefined()
+    expect(property?.type).toBe('array')
+    expect(property?.items).toEqual({ type: 'string' })
+  })
+
+  it('should mark inputImagePaths as optional in schema', () => {
+    // Arrange
+    const mcpServer = createMCPServer()
+
+    // Act
+    const toolsList = mcpServer.getToolsList()
+    const generateImageTool = toolsList.tools.find((t) => t.name === 'generate_image')
+
+    // Assert
+    expect(generateImageTool?.inputSchema.required).toContain('prompt')
+    expect(generateImageTool?.inputSchema.required).not.toContain('inputImagePaths')
+  })
+})
+
 describe('MCPServer tool schema - aspectRatio', () => {
   it('should include aspectRatio in generate_image schema', () => {
     // Arrange

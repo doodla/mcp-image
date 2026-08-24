@@ -24,6 +24,14 @@ export interface ImageApiParams {
   prompt: string
   inputImage?: string
   inputImageMimeType?: string
+  /**
+   * Multiple input images in order, for multi-reference edits or composites.
+   * Providers that support it take this over `inputImage`/`inputImageMimeType`
+   * when it is present and non-empty; `inputImage`/`inputImageMimeType` still
+   * carry the first image for providers and prompt tooling that only
+   * understand a single reference.
+   */
+  inputImages?: { data: string; mimeType: string }[]
   aspectRatio?: AspectRatio
   imageSize?: ImageSize
   useGoogleSearch?: boolean

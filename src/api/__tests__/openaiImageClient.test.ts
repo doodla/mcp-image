@@ -133,6 +133,78 @@ describe('openaiImageClient', () => {
       })
     })
 
+    it('should edit image with multiple input images', async () => {
+      mockEdit.mockResolvedValue({
+        data: [
+          {
+            b64_json: PNG_BYTES.toString('base64'),
+          },
+        ],
+      })
+      mockToFile
+        .mockResolvedValueOnce({ name: 'input-0.png', type: 'image/png' })
+        .mockResolvedValueOnce({ name: 'input-1.png', type: 'image/png' })
+
+      const clientResult = createOpenAIImageClient(testConfig)
+      expect(clientResult.success).toBe(true)
+      if (!clientResult.success) return
+
+      const imageA = Buffer.from('image-a').toString('base64')
+      const imageB = Buffer.from('image-b').toString('base64')
+      const result = await clientResult.data.generateImage({
+        prompt: 'Put the dog from the second image into the first',
+        inputImages: [
+          { data: imageA, mimeType: 'image/png' },
+          { data: imageB, mimeType: 'image/png' },
+        ],
+      })
+
+      expect(result.success).toBe(true)
+      expect(mockToFile).toHaveBeenCalledTimes(2)
+      expect(mockToFile).toHaveBeenNthCalledWith(1, Buffer.from('image-a'), 'input-0.png', {
+        type: 'image/png',
+      })
+      expect(mockToFile).toHaveBeenNthCalledWith(2, Buffer.from('image-b'), 'input-1.png', {
+        type: 'image/png',
+      })
+      expect(mockEdit).toHaveBeenCalledWith({
+        model: 'gpt-image-2',
+        prompt: 'Put the dog from the second image into the first',
+        image: [
+          { name: 'input-0.png', type: 'image/png' },
+          { name: 'input-1.png', type: 'image/png' },
+        ],
+        n: 1,
+        output_format: 'png',
+        quality: 'low',
+        size: '1024x1024',
+      })
+    })
+
+    it('should prefer inputImages over a single inputImage when both are present', async () => {
+      mockEdit.mockResolvedValue({
+        data: [{ b64_json: PNG_BYTES.toString('base64') }],
+      })
+
+      const clientResult = createOpenAIImageClient(testConfig)
+      expect(clientResult.success).toBe(true)
+      if (!clientResult.success) return
+
+      await clientResult.data.generateImage({
+        prompt: 'Edit',
+        inputImage: Buffer.from('single-image').toString('base64'),
+        inputImageMimeType: 'image/png',
+        inputImages: [
+          { data: Buffer.from('multi-image').toString('base64'), mimeType: 'image/png' },
+        ],
+      })
+
+      expect(mockToFile).toHaveBeenCalledTimes(1)
+      expect(mockToFile).toHaveBeenCalledWith(Buffer.from('multi-image'), 'input-0.png', {
+        type: 'image/png',
+      })
+    })
+
     it('should map balanced quality to medium OpenAI quality', async () => {
       mockGenerate.mockResolvedValue({
         data: [{ b64_json: PNG_BYTES.toString('base64') }],
