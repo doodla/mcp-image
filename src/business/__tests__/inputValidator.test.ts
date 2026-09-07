@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AspectRatio, GenerateImageParams } from '../../types/mcp'
 import {
   MAX_IMAGE_SIZE,
@@ -263,6 +266,95 @@ describe('inputValidator', () => {
         expect(result.error.code).toBe('INPUT_VALIDATION_ERROR')
         expect(result.error.message).toContain('useGoogleSearch must be a boolean value')
       }
+    })
+  })
+
+  describe('validateGenerateImageParams with inputImagePaths', () => {
+    let tempDir: string
+    let tempFileA: string
+    let tempFileB: string
+
+    beforeEach(() => {
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'input-validator-test-'))
+      tempFileA = path.join(tempDir, 'a.png')
+      tempFileB = path.join(tempDir, 'b.png')
+      fs.writeFileSync(tempFileA, 'fake-image-a')
+      fs.writeFileSync(tempFileB, 'fake-image-b')
+    })
+
+    afterEach(() => {
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    })
+
+    it('should return success for multiple existing image paths', () => {
+      const params: GenerateImageParams = {
+        prompt: 'Combine these two references',
+        inputImagePaths: [tempFileA, tempFileB],
+      }
+
+      const result = validateGenerateImageParams(params)
+
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.data).toEqual(params)
+      }
+    })
+
+    it('should return error when a path in inputImagePaths does not exist', () => {
+      const params: GenerateImageParams = {
+        prompt: 'Combine these two references',
+        inputImagePaths: [tempFileA, '/definitely/not/a/real/path.png'],
+      }
+
+      const result = validateGenerateImageParams(params)
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error.message).toContain('Input image file not found')
+      }
+    })
+
+    it('should reject providing both inputImagePath and inputImagePaths', () => {
+      const params: GenerateImageParams = {
+        prompt: 'Combine these two references',
+        inputImagePath: tempFileA,
+        inputImagePaths: [tempFileB],
+      }
+
+      const result = validateGenerateImageParams(params)
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error.message).toContain(
+          'Provide either inputImagePath or inputImagePaths, not both'
+        )
+      }
+    })
+
+    it('should reject more than the maximum number of input images', () => {
+      const tooMany = Array.from({ length: 11 }, () => tempFileA)
+      const params: GenerateImageParams = {
+        prompt: 'Combine these two references',
+        inputImagePaths: tooMany,
+      }
+
+      const result = validateGenerateImageParams(params)
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error.message).toContain('Too many input images')
+      }
+    })
+
+    it('should treat an empty inputImagePaths array as not provided', () => {
+      const params: GenerateImageParams = {
+        prompt: 'Generate a beautiful landscape',
+        inputImagePaths: [],
+      }
+
+      const result = validateGenerateImageParams(params)
+
+      expect(result.success).toBe(true)
     })
   })
 

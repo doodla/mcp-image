@@ -162,6 +162,111 @@ describe('geminiClient', () => {
       }
     })
 
+    it('should send one inlineData part per image, then the text part, for multi-image requests', async () => {
+      // Arrange
+      const mockResponse = {
+        response: {
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inlineData: {
+                      data: 'base64-enhanced-image-data',
+                      mimeType: 'image/png',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      }
+
+      const generateContentMock = vi.fn().mockResolvedValue(mockResponse)
+      mockGeminiClientInstance.models.generateContent = generateContentMock
+
+      const clientResult = createGeminiClient(testConfig)
+      expect(clientResult.success).toBe(true)
+      if (!clientResult.success) return
+      const client = clientResult.data
+
+      const imageA = Buffer.from('image-a').toString('base64')
+      const imageB = Buffer.from('image-b').toString('base64')
+
+      // Act
+      const result = await client.generateImage({
+        prompt: 'Put the dog from the second image into the first',
+        inputImages: [
+          { data: imageA, mimeType: 'image/png' },
+          { data: imageB, mimeType: 'image/jpeg' },
+        ],
+      })
+
+      // Assert
+      expect(result.success).toBe(true)
+      expect(generateContentMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          contents: [
+            {
+              parts: [
+                { inlineData: { data: imageA, mimeType: 'image/png' } },
+                { inlineData: { data: imageB, mimeType: 'image/jpeg' } },
+                { text: 'Put the dog from the second image into the first' },
+              ],
+            },
+          ],
+        })
+      )
+    })
+
+    it('should prefer inputImages over a single inputImage when both are present', async () => {
+      // Arrange
+      const mockResponse = {
+        response: {
+          candidates: [
+            {
+              content: {
+                parts: [{ inlineData: { data: 'result', mimeType: 'image/png' } }],
+              },
+            },
+          ],
+        },
+      }
+
+      const generateContentMock = vi.fn().mockResolvedValue(mockResponse)
+      mockGeminiClientInstance.models.generateContent = generateContentMock
+
+      const clientResult = createGeminiClient(testConfig)
+      expect(clientResult.success).toBe(true)
+      if (!clientResult.success) return
+      const client = clientResult.data
+
+      const multiImage = Buffer.from('multi-image').toString('base64')
+
+      // Act
+      await client.generateImage({
+        prompt: 'Edit',
+        inputImage: Buffer.from('single-image').toString('base64'),
+        inputImageMimeType: 'image/png',
+        inputImages: [{ data: multiImage, mimeType: 'image/png' }],
+      })
+
+      // Assert
+      expect(generateContentMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          contents: [
+            {
+              parts: [
+                { inlineData: { data: multiImage, mimeType: 'image/png' } },
+                { text: 'Edit' },
+              ],
+            },
+          ],
+        })
+      )
+    })
+
     it('should return GeminiAPIError when API returns error', async () => {
       // Arrange
       const apiError = new Error('API quota exceeded')

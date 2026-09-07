@@ -38,6 +38,9 @@ type OpenAIImageQuality = 'low' | 'medium' | 'high'
 type OpenAIImageGenerateRequest = ImageGenerateParamsNonStreaming
 type OpenAIImageEditRequest = ImageEditParamsNonStreaming
 type ImageEditApiParams = ImageApiParams & { inputImage: string }
+type ImageMultiEditApiParams = ImageApiParams & {
+  inputImages: NonNullable<ImageApiParams['inputImages']>
+}
 
 function mapQuality(quality: ImageQuality): OpenAIImageQuality {
   switch (quality) {
@@ -114,6 +117,10 @@ function mimeTypeToExtension(mimeType: string): string {
 
 const OPENAI_IMAGE_MODEL = 'gpt-image-2'
 
+function hasMultipleInputImages(params: ImageApiParams): params is ImageMultiEditApiParams {
+  return Array.isArray(params.inputImages) && params.inputImages.length > 0
+}
+
 function hasInputImage(params: ImageApiParams): params is ImageEditApiParams {
   return typeof params.inputImage === 'string' && params.inputImage.length > 0
 }
@@ -152,9 +159,11 @@ class OpenAIImageClientImpl implements ImageClient {
       const size = mapSize(params)
       const outputFormat: ImageOutputFormat = params.preferredOutputFormat ?? 'png'
 
-      const response = hasInputImage(params)
-        ? await this.editImage(params, quality, size, outputFormat)
-        : await this.createImage(params, quality, size, outputFormat)
+      const response = hasMultipleInputImages(params)
+        ? await this.editImageMulti(params, quality, size, outputFormat)
+        : hasInputImage(params)
+          ? await this.editImage(params, quality, size, outputFormat)
+          : await this.createImage(params, quality, size, outputFormat)
 
       const firstImage = response.data?.[0]
       if (!firstImage?.b64_json) {
@@ -234,6 +243,36 @@ class OpenAIImageClientImpl implements ImageClient {
       model: this.modelName,
       prompt: params.prompt,
       image: inputFile,
+      n: 1,
+      output_format: outputFormat,
+      quality,
+      size,
+    }
+
+    return await this.client.images.edit(request as unknown as OpenAIImageEditRequest)
+  }
+
+  private async editImageMulti(
+    params: ImageMultiEditApiParams,
+    quality: OpenAIImageQuality,
+    size: OpenAIImageSize,
+    outputFormat: ImageOutputFormat
+  ): Promise<ImagesResponse> {
+    const inputFiles = await Promise.all(
+      params.inputImages.map((image, index) => {
+        const mimeType = normalizeMimeType(image.mimeType || DEFAULT_MIME_TYPE)
+        return toFile(
+          Buffer.from(image.data, 'base64'),
+          `input-${index}.${mimeTypeToExtension(mimeType)}`,
+          { type: mimeType }
+        )
+      })
+    )
+
+    const request = {
+      model: this.modelName,
+      prompt: params.prompt,
+      image: inputFiles,
       n: 1,
       output_format: outputFormat,
       quality,
