@@ -145,6 +145,25 @@ function hasOwn(record: object, key: PropertyKey): boolean {
   return Object.getOwnPropertyDescriptor(record, key) !== undefined
 }
 
+/**
+ * Resolves the single input image Seedream will actually use, preferring
+ * `inputImages` (the multi-image carrier) over the legacy singular fields —
+ * matching the precedence documented on `ImageApiParams.inputImages`.
+ * Seedream itself only ever sends one image; multi-image requests are
+ * rejected before this is called.
+ */
+function resolveSingleImage(
+  input: Pick<ProviderCapabilityInput, 'inputImage' | 'inputImageMimeType' | 'inputImages'>
+): { data: string; mimeType: string } | undefined {
+  if (input.inputImages && input.inputImages.length > 0) {
+    return input.inputImages[0]
+  }
+  if (input.inputImage !== undefined && input.inputImageMimeType !== undefined) {
+    return { data: input.inputImage, mimeType: input.inputImageMimeType }
+  }
+  return undefined
+}
+
 function resolveCapabilities(
   input: ProviderCapabilityInput,
   defaultQuality: ImageQuality
@@ -181,12 +200,13 @@ function resolveCapabilities(
     return capabilityError('Seedream image editing requires one image and its MIME type')
   }
 
-  if (hasInputImage && hasInputMimeType) {
-    if (!SUPPORTED_INPUT_MIME_TYPES.some((supported) => supported === input.inputImageMimeType)) {
+  const resolvedImage = resolveSingleImage(input)
+  if (resolvedImage) {
+    if (!SUPPORTED_INPUT_MIME_TYPES.some((supported) => supported === resolvedImage.mimeType)) {
       return capabilityError('Unsupported Seedream input image MIME type')
     }
 
-    if (!isStrictBase64(input.inputImage ?? '')) {
+    if (!isStrictBase64(resolvedImage.data)) {
       return capabilityError('Invalid Seedream input image data')
     }
   }
@@ -215,13 +235,13 @@ function buildWireRequest(
   params: ImageApiParams,
   resolved: ResolvedCapabilities
 ): SeedreamImageWireRequest {
+  const resolvedImage = resolveSingleImage(params)
   const base = {
     model: resolved.route.model,
     prompt: appendAspectRatio(params.prompt, resolved.aspectRatio),
-    ...(params.inputImage &&
-      params.inputImageMimeType && {
-        image: `data:${params.inputImageMimeType};base64,${params.inputImage}`,
-      }),
+    ...(resolvedImage && {
+      image: `data:${resolvedImage.mimeType};base64,${resolvedImage.data}`,
+    }),
     size: resolved.resolution,
     response_format: 'b64_json',
     output_format: params.preferredOutputFormat ?? 'png',
@@ -384,7 +404,7 @@ class SeedreamImageClientImpl implements ImageClient {
           prompt: request.prompt,
           mimeType: getMimeTypeForOutputFormat(request.output_format),
           timestamp: new Date(),
-          inputImageProvided: params.inputImage !== undefined,
+          inputImageProvided: resolveSingleImage(params) !== undefined,
         },
       })
     } catch (error) {

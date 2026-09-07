@@ -19,6 +19,13 @@ export interface ImageProviderDefinition {
   readonly promptGeneration: Readonly<{
     maxTokens: number
   }>
+  /**
+   * Maximum number of input images this provider accepts per request.
+   * Undefined means no provider-specific limit (beyond the server-wide cap).
+   * Checked before reading any input image files off disk, so a request
+   * that exceeds it fails fast instead of paying the I/O cost first.
+   */
+  readonly maxInputImages?: number
   createTextClient(config: Config): TextClient
   createImageClient(config: Config): ImageClient
   validateImageOptions?(options: ImageOptions, config: Config): void
@@ -44,6 +51,7 @@ const IMAGE_PROVIDERS = {
   },
   seedream: {
     promptGeneration: { maxTokens: 384 },
+    maxInputImages: 1,
     createTextClient: (config) => unwrap(createSeedreamTextClient(config)),
     createImageClient: (config) => unwrap(createSeedreamImageClient(config)),
     validateImageOptions: (options, config) => {

@@ -16,7 +16,11 @@ import {
 import type { ImageApiParams, ImageClient } from '../api/imageClient.js'
 // Business logic
 import { createFileManager, type FileManager } from '../business/fileManager.js'
-import { MAX_IMAGE_SIZE, validateGenerateImageParams } from '../business/inputValidator.js'
+import {
+  MAX_IMAGE_SIZE,
+  MAX_TOTAL_INPUT_IMAGE_SIZE,
+  validateGenerateImageParams,
+} from '../business/inputValidator.js'
 import { createResponseBuilder, type ResponseBuilder } from '../business/responseBuilder.js'
 import {
   createStructuredPromptGenerator,
@@ -69,6 +73,28 @@ function createInputImageSizeError(actualSize: number): InputValidationError {
   return new InputValidationError(
     `Image size exceeds ${limitInMB}MB limit. Current size: ${sizeInMB}MB`,
     `Please compress your image or reduce its resolution to stay below ${limitInMB}MB`
+  )
+}
+
+function createTotalInputImageSizeError(actualSize: number): InputValidationError {
+  const sizeInMB = (actualSize / (1024 * 1024)).toFixed(1)
+  const limitInMB = (MAX_TOTAL_INPUT_IMAGE_SIZE / (1024 * 1024)).toFixed(1)
+  return new InputValidationError(
+    `Combined input image size exceeds ${limitInMB}MB limit. Current total: ${sizeInMB}MB`,
+    `Please use fewer or smaller input images to stay below ${limitInMB}MB combined`
+  )
+}
+
+function createTooManyInputImagesForProviderError(
+  providerName: ImageProvider,
+  actualCount: number,
+  maxAllowed: number
+): InputValidationError {
+  return new InputValidationError(
+    `Too many input images for the ${providerName} provider: ${actualCount}. Maximum allowed: ${maxAllowed}`,
+    maxAllowed === 1
+      ? `The ${providerName} provider accepts only a single input image. Use inputImagePath, or switch providers for a multi-image request`
+      : `Reduce the number of input images to at most ${maxAllowed} for the ${providerName} provider`
   )
 }
 
@@ -320,13 +346,6 @@ export class MCPServerImpl {
       }
       const provider = getImageProviderDefinition(providerName)
 
-      // Initialize clients
-      const { imageClient, structuredPromptGenerator } = this.getProviderClients(
-        config,
-        providerName,
-        provider
-      )
-
       // Handle input image(s) if provided. inputImagePaths (plural) and
       // inputImagePath (singular) are mutually exclusive by this point
       // (enforced in validateGenerateImageParams).
@@ -336,32 +355,63 @@ export class MCPServerImpl {
           ? [params.inputImagePath]
           : []
 
-      const inputImages: { data: string; mimeType: string }[] = []
-      for (const inputImagePath of inputImagePaths) {
-        const sanitizedInputPath = this.securityManager.sanitizeInputFilePath(inputImagePath)
-        if (!sanitizedInputPath.success) {
-          throw sanitizedInputPath.error
-        }
-        const extensionCheck = this.securityManager.validateImageFile(sanitizedInputPath.data)
-        if (!extensionCheck.success) {
-          throw extensionCheck.error
-        }
-        const imageBuffer = await readInputImageWithinLimit(sanitizedInputPath.data)
-        inputImages.push({
-          data: imageBuffer.toString('base64'),
-          mimeType: getMimeTypeFromExtension(path.extname(sanitizedInputPath.data)),
-        })
+      // Fail fast on a provider's input-image-count limit before reading any
+      // file off disk, so a rejected request doesn't pay for I/O it can't use.
+      if (
+        provider.maxInputImages !== undefined &&
+        inputImagePaths.length > provider.maxInputImages
+      ) {
+        throw createTooManyInputImagesForProviderError(
+          providerName,
+          inputImagePaths.length,
+          provider.maxInputImages
+        )
       }
+
+      // Initialize clients
+      const { imageClient, structuredPromptGenerator } = this.getProviderClients(
+        config,
+        providerName,
+        provider
+      )
+
+      const inputImages = await Promise.all(
+        inputImagePaths.map(async (inputImagePath) => {
+          const sanitizedInputPath = this.securityManager.sanitizeInputFilePath(inputImagePath)
+          if (!sanitizedInputPath.success) {
+            throw sanitizedInputPath.error
+          }
+          const extensionCheck = this.securityManager.validateImageFile(sanitizedInputPath.data)
+          if (!extensionCheck.success) {
+            throw extensionCheck.error
+          }
+          const imageBuffer = await readInputImageWithinLimit(sanitizedInputPath.data)
+          return {
+            data: imageBuffer.toString('base64'),
+            mimeType: getMimeTypeFromExtension(path.extname(sanitizedInputPath.data)),
+            byteLength: imageBuffer.length,
+          }
+        })
+      )
+
+      const totalInputImageBytes = inputImages.reduce((sum, image) => sum + image.byteLength, 0)
+      if (totalInputImageBytes > MAX_TOTAL_INPUT_IMAGE_SIZE) {
+        throw createTotalInputImageSizeError(totalInputImageBytes)
+      }
+
+      // Drop the byteLength bookkeeping field before this crosses into the
+      // provider-neutral ImageApiParams shape.
+      const inputImagesForProvider = inputImages.map(({ data, mimeType }) => ({ data, mimeType }))
 
       // The first image is also carried on the singular fields, for providers
       // and prompt tooling that only understand a single reference image.
-      const inputImageData = inputImages[0]?.data
-      const inputImageMimeType = inputImages[0]?.mimeType
+      const inputImageData = inputImagesForProvider[0]?.data
+      const inputImageMimeType = inputImagesForProvider[0]?.mimeType
 
       const imageOptions = {
         ...(inputImageData && { inputImage: inputImageData }),
         ...(inputImageMimeType && { inputImageMimeType }),
-        ...(inputImages.length > 0 && { inputImages }),
+        ...(inputImagesForProvider.length > 0 && { inputImages: inputImagesForProvider }),
         ...(params.aspectRatio && { aspectRatio: params.aspectRatio }),
         ...(params.imageSize && { imageSize: params.imageSize }),
         ...(params.useGoogleSearch !== undefined && {

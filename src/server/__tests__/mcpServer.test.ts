@@ -1,3 +1,6 @@
+import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -504,6 +507,43 @@ describe('MCP Server', () => {
     expect(responseData.error.message).toContain(
       'Provide either inputImagePath or inputImagePaths, not both'
     )
+  })
+
+  it('should reject a multi-image request for a provider with a single-image limit before reading any file', async () => {
+    // Arrange: seedream declares maxInputImages: 1. Stub fetch so the test
+    // fails loudly (not by hanging on a real network call) if the fast-fail
+    // check doesn't actually run before image generation.
+    process.env.IMAGE_PROVIDER = 'seedream'
+    process.env.ARK_API_KEY = 'test-seedream-api-key'
+    const fetchSpy = vi.fn().mockRejectedValue(new Error('network should not be called'))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-server-test-'))
+    const fileA = path.join(tempDir, 'a.png')
+    const fileB = path.join(tempDir, 'b.png')
+    fs.writeFileSync(fileA, 'fake-image-a')
+    fs.writeFileSync(fileB, 'fake-image-b')
+
+    try {
+      const mcpServer = createMCPServer()
+
+      // Act
+      const result = await mcpServer.callTool('generate_image', {
+        prompt: 'Combine two references',
+        inputImagePaths: [fileA, fileB],
+      })
+
+      // Assert
+      expect(result.isError).toBe(true)
+      const responseData = JSON.parse(result.content[0].text)
+      expect(responseData.error.message).toContain(
+        'Too many input images for the seedream provider: 2. Maximum allowed: 1'
+      )
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true })
+      vi.unstubAllGlobals()
+    }
   })
 
   it('should route image generation through OpenAI provider when configured', async () => {

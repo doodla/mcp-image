@@ -290,6 +290,21 @@ describe('seedreamImageClient', () => {
     }
   })
 
+  it('serializes a single image passed only via inputImages, without the legacy singular fields', async () => {
+    const inputImage = PNG_BYTES.toString('base64')
+
+    const result = await createClient().generateImage({
+      prompt: PRIVATE_PROMPT,
+      inputImages: [{ data: inputImage, mimeType: 'image/png' }],
+    })
+
+    expect(result.success).toBe(true)
+    expect(readRequest().body.image).toBe(`data:image/png;base64,${inputImage}`)
+    if (result.success) {
+      expect(result.data.metadata.inputImageProvided).toBe(true)
+    }
+  })
+
   it('rejects more than one input image', async () => {
     const result = await createClient().generateImage({
       prompt: PRIVATE_PROMPT,

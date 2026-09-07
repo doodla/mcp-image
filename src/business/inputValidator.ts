@@ -17,6 +17,10 @@ const PROMPT_MIN_LENGTH = 1
 const PROMPT_MAX_LENGTH = 4000
 export const MAX_IMAGE_SIZE = 10 * 1024 * 1024 // 10MB in bytes
 export const MAX_INPUT_IMAGES = 10
+// Well under MAX_IMAGE_SIZE * MAX_INPUT_IMAGES (100MB): most multi-image
+// composites need 2-4 references, so this bounds worst-case memory/request
+// size without blocking that common case.
+export const MAX_TOTAL_INPUT_IMAGE_SIZE = 30 * 1024 * 1024 // 30MB in bytes
 const SUPPORTED_ASPECT_RATIOS = ASPECT_RATIO_VALUES
 const SUPPORTED_QUALITY_VALUES = IMAGE_QUALITY_VALUES
 const SUPPORTED_PROVIDER_VALUES = IMAGE_PROVIDER_VALUES
